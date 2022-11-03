@@ -314,9 +314,28 @@ int
 doCheck(PTDNFRPMTS pTS)
 {
     int nResult = 0;
+
+    nResult = rpmtsCheck(pTS->pTS);
+
+    rpmps ps = rpmtsProblems(pTS->pTS);
+    if(ps)
+    {
+        int nProbs = rpmpsNumProblems(ps);
+        if(nProbs > 0)
+        {
+            nResult = ERROR_TDNF_RPM_CHECK;
+        }
+        rpmpsFree(ps);
+    }
+
+    return nResult;
+}
+
+void
+reportProblems(PTDNFRPMTS pTS)
+{
     rpmpsi psi = NULL;
     rpmProblem prob = NULL;
-    nResult = rpmtsCheck(pTS->pTS);
     char *pErrorStr = NULL;
     uint32_t dwError = 0;
 
@@ -329,7 +348,7 @@ doCheck(PTDNFRPMTS pTS)
             pr_crit("Found %d problems\n", nProbs);
 
             psi = rpmpsInitIterator(ps);
-            while(rpmpsNextIterator(psi) >= 0)
+            while(!dwError && rpmpsNextIterator(psi) >= 0)
             {
                 prob = rpmpsGetProblem(psi);
                 char *msg = rpmProblemString(prob);
@@ -343,23 +362,24 @@ doCheck(PTDNFRPMTS pTS)
                     if (rpmProblemGetType(prob) == RPMPROB_REQUIRES)
                     {
                         dwError = TDNFAllocateString(rpmProblemGetStr(prob), &pErrorStr);
-                        BAIL_ON_TDNF_ERROR(dwError);
+                        if (!dwError) {
+                            dwError = TDNFDetectPreTransFailure(pTS->pTS, pErrorStr);
+                        }
 
-                        dwError = TDNFDetectPreTransFailure(pTS->pTS, pErrorStr);
-                        BAIL_ON_TDNF_ERROR(dwError);
+                        TDNF_SAFE_FREE_MEMORY(pErrorStr);
                     }
                 }
-                rpmProblemFree(prob);
             }
             rpmpsFreeIterator(psi);
-            nResult = ERROR_TDNF_RPM_CHECK;
         }
     }
-cleanup:
+
     TDNF_SAFE_FREE_MEMORY(pErrorStr);
-    return nResult;
-error:
-    goto cleanup;
+    if (ps)
+    {
+        rpmpsFree(ps);
+    }
+    return;
 }
 
 uint32_t
@@ -440,9 +460,9 @@ cleanup:
     return dwError;
 
 error:
-    if(pTS && dwError != ERROR_TDNF_RPM_CHECK)
+    if(pTS)
     {
-        doCheck(pTS);
+        reportProblems(pTS);
     }
     goto cleanup;
 }
